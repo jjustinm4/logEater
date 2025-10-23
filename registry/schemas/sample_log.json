@@ -1,0 +1,30 @@
+{
+  "timestamp": "",
+  "session_id": "",
+  "level": "",
+  "message": "",
+  "chat_history": [
+    {
+      "role": "",
+      "message": ""
+    }
+  ],
+  "pipeline": {
+    "intent_identifier": {
+      "intent": "",
+      "confidence": 0
+    },
+    "retriever": {
+      "documents_found": 0,
+      "top_document": {
+        "title": "",
+        "snippet": ""
+      }
+    }
+  },
+  "final_payload": {
+    "status": "",
+    "latency_ms": 0,
+    "response_text": ""
+  }
+}

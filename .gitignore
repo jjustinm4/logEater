@@ -1,0 +1,51 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+*.spec
+*.log
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build and distribution folders
+build/
+dist/
+
+# Temporary or cache data
+*.tmp
+*.cache/
+.cache/
+
+# Jupyter Notebook checkpoints (if any)
+.ipynb_checkpoints/
+
+# PyInstaller or similar artifacts
+*.manifest
+*.spec
+
+# --- Project specific ---
+# Ignore installer outputs or binaries if created here
+installers/output/
+output/
+logs/

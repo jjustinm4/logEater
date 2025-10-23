@@ -29,20 +29,20 @@ class SearchPanel(QWidget):
             "Enter keyword or regex pattern... (For AND/OR use comma-separated terms)"
         )
 
-        # Case and regex checkboxes
+        # Case, regex, AND/OR, Non-exist
         self.case_checkbox = QCheckBox("Case Sensitive")
         self.regex_checkbox = QCheckBox("Use Regex")
+        self.not_exists_checkbox = QCheckBox("Search for Non-Existent Pattern Only")
 
-        # AND / OR selector
         self.logic_selector = QComboBox()
         self.logic_selector.addItems(["Single Pattern", "AND", "OR"])
 
         logic_layout = QHBoxLayout()
         logic_layout.addWidget(self.case_checkbox)
         logic_layout.addWidget(self.regex_checkbox)
-        logic_layout.addStretch()
         logic_layout.addWidget(QLabel("Mode:"))
         logic_layout.addWidget(self.logic_selector)
+        logic_layout.addWidget(self.not_exists_checkbox)
 
         # Search + Export buttons
         search_btn = QPushButton("Search")
@@ -89,6 +89,7 @@ class SearchPanel(QWidget):
         use_regex = self.regex_checkbox.isChecked()
         case_sensitive = self.case_checkbox.isChecked()
         logic_mode = self.logic_selector.currentText()
+        non_exist_mode = self.not_exists_checkbox.isChecked()
 
         try:
             self.result_area.setText("Running search...\n")
@@ -100,36 +101,37 @@ class SearchPanel(QWidget):
                 case_sensitive=case_sensitive
             )
             self.last_results = results
-            self._render_results(results)
+            self._render_results(results, non_exist_mode)
         except ValueError as ve:
             QMessageBox.critical(self, "Invalid Pattern", str(ve))
         except Exception as e:
             QMessageBox.critical(self, "Search Error", str(e))
 
-    def _render_results(self, results: SearchResult):
+    def _render_results(self, results: SearchResult, non_exist_mode: bool):
         lines: list[str] = []
         lines.append("=== SEARCH RESULTS ===\n")
 
-        # Matched
-        lines.append(f"MATCHED FILES ({len(results.matched)}):")
-        for fm in results.matched:
-            lines.append(f"  - {fm.file}")
-        lines.append("")
+        if non_exist_mode:
+            # Only show files that do NOT contain pattern
+            lines.append(f"NON-MATCHED FILES ({len(results.not_matched)}):")
+            for nf in results.not_matched:
+                lines.append(f"  - {nf}")
 
-        # Not matched
-        lines.append(f"NON-MATCHED FILES ({len(results.not_matched)}):")
-        for nf in results.not_matched:
-            lines.append(f"  - {nf}")
-        lines.append("")
+            lines.append("\nMATCH PREVIEW:\n(none)")
+        else:
+            # Normal mode
+            lines.append(f"MATCHED FILES ({len(results.matched)}):")
+            for fm in results.matched:
+                lines.append(f"  - {fm.file}")
 
-        # Preview
-        lines.append("MATCH PREVIEW:")
-        for fm in results.matched:
-            lines.append(f"\n{fm.file}:")
-            for m in fm.matches:
-                # Clip very long lines for readability
-                snippet = m.text if len(m.text) <= 300 else (m.text[:300] + " ...")
-                lines.append(f"  (line {m.line}) {snippet}")
+                lines.append("")
+
+            lines.append("MATCH PREVIEW:")
+            for fm in results.matched:
+                lines.append(f"\n{fm.file}:")
+                for m in fm.matches:
+                    snippet = m.text if len(m.text) <= 300 else (m.text[:300] + " ...")
+                    lines.append(f"  (line {m.line}) {snippet}")
 
         self.result_area.setPlainText("\n".join(lines))
 
@@ -144,7 +146,6 @@ class SearchPanel(QWidget):
 
         try:
             with open(path, "w", encoding="utf-8", errors="ignore") as f:
-                # Reuse the current rendered view
                 f.write(self.result_area.toPlainText())
             QMessageBox.information(self, "Exported", f"Results saved to:\n{path}")
         except Exception as e:
