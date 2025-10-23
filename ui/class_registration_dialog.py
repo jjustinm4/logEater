@@ -144,3 +144,62 @@ class ClassRegistrationDialog(QDialog):
 
         QMessageBox.information(self, "Saved", f"Schema saved to:\n{out_path}")
         self.save_btn.setEnabled(False)
+
+    def _safe_module_name(name: str) -> str:
+        import re
+        s = name.strip().lower()
+        s = re.sub(r"[^a-z0-9]+", "_", s)
+        s = re.sub(r"_+", "_", s).strip("_")
+        return f"{s}_parser"
+
+    def _class_name_from_schema(name: str) -> str:
+        import re
+        core = re.sub(r"[^a-zA-Z0-9]+", " ", name).title().replace(" ", "")
+        return core + "Parser" if not core.endswith("Parser") else core
+
+    def _write_parser_file(project_root: Path, class_name: str) -> Path:
+        parsers_dir = project_root / "core" / "schema" / "parsers"
+        parsers_dir.mkdir(parents=True, exist_ok=True)
+
+        module_stem = _safe_module_name(class_name)
+        class_title = _class_name_from_schema(class_name)
+        out_path = parsers_dir / f"{module_stem}.py"
+
+        if out_path.exists():
+            return out_path  # don't overwrite existing customizations
+
+        content = f'''# Auto-generated parser for schema: {class_name}
+    from __future__ import annotations
+    from typing import Dict, Any, List
+
+    from .base_parser import BaseParser
+    from core.util.dot_walker import get_dot_value
+
+    class {class_title}(BaseParser):
+        """
+        Auto-generated parser for schema: {class_name}
+
+        You may override logic for specific fields here.
+
+        Example:
+            def extract_field(self, data: Dict[str, Any], field: str):
+                if field == "timestamp":
+                    raw = get_dot_value(data, field)
+                    # custom normalization
+                    return raw  # or transformed value
+                return None  # use default
+
+        Default behavior: falls back to dot-path walker for all fields.
+        """
+
+        def extract_field(self, data: Dict[str, Any], field: str):
+            # No overrides by default — return None to use dot-walker fallback.
+            return None
+
+        def _fallback_get(self, data: Dict[str, Any], field: str):
+            # Use shared dot walker
+            return get_dot_value(data, field)
+    '''
+        out_path.write_text(content, encoding="utf-8")
+        return out_path
+
