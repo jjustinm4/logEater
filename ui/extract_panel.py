@@ -9,6 +9,7 @@ import json
 from typing import Dict, Any, List, Tuple, Iterable, DefaultDict
 from collections import defaultdict
 from core.extract.extract_service import ExtractService
+from core.extract.extract_service import ExtractService
 
 
 
@@ -40,6 +41,8 @@ class CollapsibleGroup(QGroupBox):
 
         self._main.addWidget(self._header)
         self._main.addWidget(self._content)
+        self.extract_service = ExtractService()
+
 
     def _on_toggled(self, checked: bool):
         self._header.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
@@ -186,24 +189,30 @@ class ExtractPanel(QWidget):
             QMessageBox.warning(self, "Folder", "Please select a folder to extract from.")
             return
 
+        schema_name = self.schema_selector.currentText().strip()
+        if not schema_name or schema_name.lower().startswith("select"):
+            QMessageBox.warning(self, "Schema", "Please choose a schema (Refresh if needed).")
+            return
+
         selected = self._selected_fields()
         if not selected:
             QMessageBox.warning(self, "Fields", "Please select at least one field to extract.")
             return
 
         fmt = self.format_selector.currentText().upper()
-        # choose save path
         default_name = "extracted.json" if fmt == "JSON" else "extracted.txt"
-        path, _ = QFileDialog.getSaveFileName(self, "Save Extraction Output", default_name,
-                                              "JSON (*.json);;Text (*.txt);;All Files (*.*)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Extraction Output", default_name,
+            "JSON (*.json);;Text (*.txt);;All Files (*.*)"
+        )
         if not path:
             return
 
         try:
             if fmt == "JSON" or path.lower().endswith(".json"):
-                summary = self.extract_service.extract_to_json(folder, selected, path)
+                summary = self.extract_service.extract_to_json(folder, schema_name, selected, path)
             else:
-                summary = self.extract_service.extract_to_txt(folder, selected, path)
+                summary = self.extract_service.extract_to_txt(folder, schema_name, selected, path)
         except Exception as e:
             QMessageBox.critical(self, "Extraction Error", str(e))
             return
@@ -215,6 +224,7 @@ class ExtractPanel(QWidget):
             f"- Failed to parse: {summary.parsed_failed}\n"
             f"- Output: {summary.written_path}\n"
         )
+
 
 
     # ---------- Helpers ----------

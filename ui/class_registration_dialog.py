@@ -42,7 +42,7 @@ class ClassRegistrationDialog(QDialog):
 
         # Actions
         btn_row = QHBoxLayout()
-        self.gen_btn = QPushButton("Generate Schema (LLM)")
+        self.gen_btn = QPushButton("Generate Schema via AI")
         self.gen_btn.clicked.connect(self.generate_schema)
         self.save_btn = QPushButton("Save Schema")
         self.save_btn.clicked.connect(self.save_schema)
@@ -87,44 +87,50 @@ class ClassRegistrationDialog(QDialog):
             QMessageBox.warning(self, "Sample Log", "Please paste or load a sample log.")
             return
 
+        # UI state
         self.gen_btn.setEnabled(False)
-        self.schema_preview.setPlainText("Calling LLM (Ollama) to generate schema...")
+        self.schema_preview.setPlainText("Building deterministic skeleton...\n")
 
+        # Step 1: Deterministic skeleton (rule-based)
         try:
-            schema = self.extractor.extract_schema(sample)
-        except SchemaExtractionError as e:
-            # F3: Hybrid — concise error with expandable raw output details
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Critical)
-            msg.setWindowTitle("Schema Generation Failed")
-            msg.setText("The model's output could not be parsed into a valid JSON schema.")
-            diag = e.diagnostics
-            meta = f"Attempts: {diag.attempts}, Prompt chars: {diag.prompt_chars}, Raw chars: {diag.raw_output_chars}"
-            msg.setInformativeText(meta)
-            msg.setDetailedText(e.raw_output or "(no raw output)")
-            msg.addButton("Close", QMessageBox.AcceptRole)
-            msg.exec()
-            self.gen_btn.setEnabled(True)
-            self.save_btn.setEnabled(False)
-            self.schema_preview.setPlainText("")
-            return
+            # use_ai_refine=False here to separately show skeleton then refined
+            base_schema = self.extractor.extract_schema(sample, use_ai_refine=False)
         except Exception as e:
-            QMessageBox.critical(self, "Schema Error", str(e))
+            QMessageBox.critical(self, "Schema Error", f"Could not build skeleton:\n{e}")
             self.gen_btn.setEnabled(True)
             self.save_btn.setEnabled(False)
             self.schema_preview.setPlainText("")
             return
 
-        pretty = json.dumps(schema, indent=2, ensure_ascii=False)
-        self.generated_schema_text = pretty
-        self.schema_preview.setPlainText(pretty)
+        base_pretty = json.dumps(base_schema, indent=2, ensure_ascii=False)
+        self.schema_preview.setPlainText(
+            "Deterministic skeleton generated.\n\n"
+            "Attempting AI refinement (non-destructive)...\n\n"
+            f"--- SKELETON ---\n{base_pretty}\n"
+        )
+
+        # Step 2: AI refinement (safe fallback if it fails)
+        try:
+            refined = self.extractor.extract_schema(sample, use_ai_refine=True)
+            pretty = json.dumps(refined, indent=2, ensure_ascii=False)
+            self.generated_schema_text = pretty
+            self.schema_preview.setPlainText(pretty)
+            self.save_btn.setEnabled(True)
+        except Exception as e:
+            # fall back to skeleton
+            self.generated_schema_text = base_pretty
+            self.schema_preview.setPlainText(
+                f"{base_pretty}\n\n(Shown is deterministic skeleton; AI refinement failed: {e})"
+            )
+            self.save_btn.setEnabled(True)
+
         self.gen_btn.setEnabled(True)
-        self.save_btn.setEnabled(True)
 
     def save_schema(self):
         if not self.generated_schema_text:
             QMessageBox.information(self, "No Schema", "Generate a schema first.")
             return
+
         class_name = self.class_name_input.text().strip()
         if not class_name:
             QMessageBox.warning(self, "Class Name", "Please provide a class name.")
