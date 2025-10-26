@@ -1,27 +1,45 @@
+from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog,
     QHBoxLayout, QTextEdit, QComboBox, QMessageBox, QScrollArea, QFrame,
     QToolButton, QGroupBox, QCheckBox, QSizePolicy
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
 from pathlib import Path
 import json
-from typing import Dict, Any, List, Tuple, Iterable, DefaultDict
+from typing import Dict, Any, List, DefaultDict
 from collections import defaultdict
+
 from core.extract.extract_service import ExtractService
-from core.extract.extract_service import ExtractService
+from core.ai.insight_service import InsightService
 
 
+# ---------------- AI Worker ----------------
+class AIWorker(QObject):
+    finished = Signal(str)
+    error = Signal(str)
 
+    def __init__(self, insight_service: InsightService, text: str):
+        super().__init__()
+        self.svc = insight_service
+        self.text = text
+
+    def run(self):
+        try:
+            out = self.svc.summarize_text(self.text)
+            self.finished.emit(out)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ---------------- Collapsible Group (unchanged) ----------------
 class CollapsibleGroup(QGroupBox):
-    """A simple collapsible group using a toggle toolbutton."""
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
-        self.setTitle("")  # we render our own header
+        self.setTitle("")
         self._main = QVBoxLayout(self)
         self._main.setContentsMargins(0, 0, 0, 0)
 
-        # Header
         self._header = QToolButton()
         self._header.setStyleSheet("QToolButton { border: none; font-weight: 600; }")
         self._header.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
@@ -31,7 +49,6 @@ class CollapsibleGroup(QGroupBox):
         self._header.setChecked(False)
         self._header.toggled.connect(self._on_toggled)
 
-        # Content area
         self._content = QWidget()
         self._content.setVisible(False)
         self._content.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -43,160 +60,160 @@ class CollapsibleGroup(QGroupBox):
         self._main.addWidget(self._content)
         self.extract_service = ExtractService()
 
-
     def _on_toggled(self, checked: bool):
         self._header.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
         self._content.setVisible(checked)
 
 
+# ---------------- Extract Panel (Main UI) ----------------
 class ExtractPanel(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Folder input
+        self.extract_service = ExtractService()
+        self.insight_service = InsightService(model="llama3:latest")
+
+        self.thread = None
+        self.ai_worker = None
+        self._dot_timer = None
+        self._dot_state = 0
+        self.checkbox_map: Dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Extract Panel"))
+
+        # Folder picker
         self.folder_input = QLineEdit()
         self.folder_input.setPlaceholderText("Select folder for extraction...")
-
         browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_folder)
-
-        folder_layout = QHBoxLayout()
-        folder_layout.addWidget(self.folder_input)
-        folder_layout.addWidget(browse_btn)
+        fl = QHBoxLayout()
+        fl.addWidget(self.folder_input)
+        fl.addWidget(browse_btn)
+        layout.addLayout(fl)
 
         # Schema selector
         self.schema_selector = QComboBox()
-        self.schema_selector.addItem("Select schema...")  # populated by refresh
-
+        self.schema_selector.addItem("Select schema...")
         refresh_btn = QPushButton("Refresh Schemas")
         refresh_btn.clicked.connect(self.refresh_schemas)
-
         load_fields_btn = QPushButton("Load Fields")
         load_fields_btn.clicked.connect(self.load_fields_from_schema)
+        sl = QHBoxLayout()
+        sl.addWidget(QLabel("Schema:"))
+        sl.addWidget(self.schema_selector)
+        sl.addWidget(refresh_btn)
+        sl.addWidget(load_fields_btn)
+        layout.addLayout(sl)
 
-        schema_layout = QHBoxLayout()
-        schema_layout.addWidget(QLabel("Schema:"))
-        schema_layout.addWidget(self.schema_selector)
-        schema_layout.addWidget(refresh_btn)
-        schema_layout.addWidget(load_fields_btn)
-
-        # Field selection area (scrollable)
+        # Field selection scroll
         self.fields_scroll = QScrollArea()
         self.fields_scroll.setWidgetResizable(True)
         self.fields_container = QWidget()
         self.fields_layout = QVBoxLayout(self.fields_container)
-        self.fields_layout.setContentsMargins(0, 0, 0, 0)
-        self.fields_layout.setSpacing(8)
         self.fields_scroll.setWidget(self.fields_container)
+        layout.addWidget(QLabel("Schema Fields"))
+        layout.addWidget(self.fields_scroll)
 
-        # Output format
+        # Format selector
         self.format_selector = QComboBox()
         self.format_selector.addItems(["TXT", "JSON"])
+        fmtrow = QHBoxLayout()
+        fmtrow.addWidget(QLabel("Output Format:"))
+        fmtrow.addWidget(self.format_selector)
+        fmtrow.addStretch()
+        layout.addLayout(fmtrow)
 
-        format_layout = QHBoxLayout()
-        format_layout.addWidget(QLabel("Output Format:"))
-        format_layout.addWidget(self.format_selector)
-        format_layout.addStretch()
-
-        # Extract button
+        # Buttons row
+        btn_row = QHBoxLayout()
         extract_btn = QPushButton("Extract")
-        extract_btn.clicked.connect(self.extract_data)  # backend wires later
+        extract_btn.clicked.connect(self.extract_data)
+        self.ai_btn = QPushButton("Generate AI Insight")
+        self.ai_btn.clicked.connect(self.generate_ai_insight)
+        self.ai_btn.setEnabled(False)
+        btn_row.addWidget(extract_btn)
+        btn_row.addWidget(self.ai_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
 
-        # Output area
+        # Extraction output
         self.result_area = QTextEdit()
         self.result_area.setReadOnly(True)
         self.result_area.setPlaceholderText("Extraction summary will be shown here...")
-
-        # Assemble
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Extract Panel"))
-        layout.addLayout(folder_layout)
-        layout.addLayout(schema_layout)
-        layout.addWidget(QLabel("Schema Fields"))
-        layout.addWidget(self.fields_scroll)
-        layout.addLayout(format_layout)
-        layout.addWidget(extract_btn)
         layout.addWidget(self.result_area)
-        self.setLayout(layout)
 
-        # Internal state
-        self.checkbox_map: Dict[str, QCheckBox] = {}  # dot_path -> checkbox
-        self.extract_service = ExtractService()
+        # AI progress + AI output box (at bottom)
+        self.ai_progress = QLabel("")
+        self.ai_progress.setAlignment(Qt.AlignCenter)
+        self.ai_progress.setVisible(False)
+        layout.addWidget(self.ai_progress)
 
+        self.ai_output = QTextEdit()
+        self.ai_output.setReadOnly(True)
+        self.ai_output.setPlaceholderText("AI Insight will appear here...")
+        layout.addWidget(self.ai_output)
 
-    # ---------- UI Actions ----------
-
+    # ---------------- Extraction unchanged ----------------
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Folder")
         if folder:
             self.folder_input.setText(folder)
 
     def refresh_schemas(self):
-        """Load list of schema files from /registry/schemas/*.json"""
         try:
-            root = Path(__file__).resolve().parents[1]  # project root
+            root = Path(__file__).resolve().parents[1]
             schemas_dir = root / "registry" / "schemas"
             self.schema_selector.clear()
-            found_any = False
+            found = False
             if schemas_dir.exists():
                 for f in sorted(schemas_dir.glob("*.json")):
                     self.schema_selector.addItem(f.stem, userData=str(f))
-                    found_any = True
-            if not found_any:
+                    found = True
+            if not found:
                 self.schema_selector.addItem("No schemas found")
-            QMessageBox.information(self, "Schemas", "Schema list refreshed.")
         except Exception as e:
-            QMessageBox.critical(self, "Schema Error", f"Failed to refresh schemas:\n{e}")
+            QMessageBox.critical(self, "Schema Error", str(e))
 
     def load_fields_from_schema(self):
-        """Read selected schema JSON and build grouped checkbox UI (collapsible)."""
         data_path = self.schema_selector.currentData()
         if not data_path or not isinstance(data_path, str):
-            QMessageBox.warning(self, "Schema", "Please select a valid schema (use Refresh Schemas).")
+            QMessageBox.warning(self, "Schema", "Please select a valid schema first.")
             return
         try:
             schema = json.loads(Path(data_path).read_text(encoding="utf-8"))
         except Exception as e:
-            QMessageBox.critical(self, "Schema Load Error", f"Could not load schema:\n{e}")
+            QMessageBox.critical(self, "Schema Load Error", str(e))
             return
 
-        # Build flattened dot-paths grouped by top-level key
         grouped = self._flatten_to_groups(schema)
-
-        # Clear previous
         self._clear_fields_ui()
         self.checkbox_map.clear()
 
-        # Build collapsible groups
         for group_name, fields in grouped.items():
             grp = CollapsibleGroup(group_name, self)
             for dot_path in fields:
                 cb = QCheckBox(dot_path)
                 grp.content_layout.addWidget(cb)
                 self.checkbox_map[dot_path] = cb
-            # small spacer for breath
             spacer = QFrame()
-            spacer.setFrameShape(QFrame.NoFrame)
             grp.content_layout.addWidget(spacer)
             self.fields_layout.addWidget(grp)
-
         self.fields_layout.addStretch(1)
-        self.result_area.setPlainText("Fields loaded. Select what you need, choose output format, then click Extract.")
 
     def extract_data(self):
         folder = self.folder_input.text().strip()
         if not folder:
-            QMessageBox.warning(self, "Folder", "Please select a folder to extract from.")
+            QMessageBox.warning(self, "Folder", "Please select a folder.")
             return
 
         schema_name = self.schema_selector.currentText().strip()
         if not schema_name or schema_name.lower().startswith("select"):
-            QMessageBox.warning(self, "Schema", "Please choose a schema (Refresh if needed).")
+            QMessageBox.warning(self, "Schema", "Please choose a schema.")
             return
 
         selected = self._selected_fields()
         if not selected:
-            QMessageBox.warning(self, "Fields", "Please select at least one field to extract.")
+            QMessageBox.warning(self, "Fields", "Please select at least one field.")
             return
 
         fmt = self.format_selector.currentText().upper()
@@ -221,14 +238,72 @@ class ExtractPanel(QWidget):
             "Extraction complete.\n"
             f"- Files scanned: {summary.scanned}\n"
             f"- Parsed OK: {summary.parsed_ok}\n"
-            f"- Failed to parse: {summary.parsed_failed}\n"
+            f"- Failed: {summary.parsed_failed}\n"
             f"- Output: {summary.written_path}\n"
         )
+        self.ai_btn.setEnabled(True)
 
+    # ---------------- AI Flow (NEW) ----------------
+    def generate_ai_insight(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Extracted Output", "", "Text or JSON Files (*.txt *.json)"
+        )
+        if not file_path:
+            return
 
+        try:
+            extracted_text = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            QMessageBox.critical(self, "File Error", str(e))
+            return
 
-    # ---------- Helpers ----------
+        self.ai_btn.setEnabled(False)
+        self.ai_output.clear()
+        self._start_spinner("Analyzing with AI...")
 
+        self.thread = QThread()
+        self.ai_worker = AIWorker(self.insight_service, extracted_text)
+        self.ai_worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.ai_worker.run)
+        self.ai_worker.finished.connect(self._ai_done)
+        self.ai_worker.error.connect(self._ai_error)
+
+        self.ai_worker.finished.connect(self.ai_worker.deleteLater)
+        self.ai_worker.error.connect(self.ai_worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        self.thread.start()
+
+    def _ai_done(self, out: str):
+        self._stop_spinner()
+        self.ai_output.setPlainText(out or "(No AI output)")
+        self.ai_btn.setEnabled(True)
+
+    def _ai_error(self, msg: str):
+        self._stop_spinner()
+        QMessageBox.critical(self, "AI Error", msg)
+        self.ai_btn.setEnabled(True)
+
+    # ---------------- Spinner ----------------
+    def _start_spinner(self, base_text: str):
+        self.ai_progress.setVisible(True)
+        self.ai_progress.setText(base_text)
+        self._dot_state = 0
+        self._dot_timer = QTimer(self)
+        self._dot_timer.timeout.connect(lambda: self._animate_dots(base_text))
+        self._dot_timer.start(350)
+
+    def _animate_dots(self, base):
+        self._dot_state = (self._dot_state + 1) % 4
+        self.ai_progress.setText(base + "." * self._dot_state)
+
+    def _stop_spinner(self):
+        if self._dot_timer:
+            self._dot_timer.stop()
+        self.ai_progress.setVisible(False)
+
+    # ---------------- Helpers ----------------
     def _clear_fields_ui(self):
         while self.fields_layout.count():
             item = self.fields_layout.takeAt(0)
@@ -240,56 +315,35 @@ class ExtractPanel(QWidget):
         return [path for path, cb in self.checkbox_map.items() if cb.isChecked()]
 
     def _flatten_to_groups(self, schema: Any) -> DefaultDict[str, List[str]]:
-        """
-        Convert nested schema to grouped dot-paths.
-        Group key = top-level field name.
-        Arrays: show children of object elements (no [0] indexes).
-        Primitive arrays: just the array key.
-        """
         grouped: DefaultDict[str, List[str]] = defaultdict(list)
 
-        def add(group: str, path: str):
-            grouped[group].append(path)
+        def add(g, p): grouped[g].append(p)
 
-        def walk(node: Any, prefix: str = "", group: str = ""):
-            # Determine group from top-level
+        def walk(node, prefix="", group=""):
             if prefix and "." not in prefix:
                 group = prefix.split(".")[0]
-            elif not prefix and isinstance(node, dict):
-                # top-level dict: each key becomes its own group in recursion
-                pass
 
             if isinstance(node, dict):
                 if prefix == "":
-                    # top-level object: recurse each key separately to create groups
                     for k, v in node.items():
                         walk(v, k, k)
                 else:
-                    # inside object
                     for k, v in node.items():
-                        new_prefix = f"{prefix}.{k}"
-                        walk(v, new_prefix, group or prefix.split(".")[0])
+                        walk(v, f"{prefix}.{k}", group or prefix.split(".")[0])
             elif isinstance(node, list):
                 if not node:
-                    # empty array: include the array itself
                     add(group or prefix.split(".")[0], prefix)
                 else:
                     first = node[0]
                     if isinstance(first, dict):
-                        # show children fields of objects (no index)
                         for k, v in first.items():
-                            child_path = f"{prefix}.{k}"
-                            walk(v, child_path, group or prefix.split(".")[0])
+                            walk(v, f"{prefix}.{k}", group or prefix.split(".")[0])
                     else:
-                        # primitive array: include the array field itself
                         add(group or prefix.split(".")[0], prefix)
             else:
-                # primitive value -> add the path
-                if prefix:
-                    add(group or prefix.split(".")[0], prefix)
+                add(group or prefix.split(".")[0], prefix)
 
         walk(schema, "", "")
-        # Sort fields within each group for a stable UI
         for k in list(grouped.keys()):
             grouped[k] = sorted(set(grouped[k]))
         return grouped
