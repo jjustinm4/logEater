@@ -1,0 +1,18 @@
+{
+  "timestamp": "2025-01-22T10:02:15Z",
+  "session_id": "ABC123",
+  "level": "INFO",
+  "message": "Completed answer",
+  "chat_history": [
+    {"role": "user", "message": "What is photosynthesis?"},
+    {"role": "assistant", "message": "Photosynthesis is a process used by plants..."}
+  ],
+  "pipeline": {
+    "intent_identifier": {"intent": "science_query", "confidence": 0.97}
+  },
+  "final_payload": {
+    "status": "success",
+    "latency_ms": 612,
+    "response_text": "Photosynthesis is how plants convert light into energy."
+  }
+}

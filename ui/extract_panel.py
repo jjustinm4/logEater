@@ -128,13 +128,21 @@ class ExtractPanel(QWidget):
         btn_row = QHBoxLayout()
         extract_btn = QPushButton("Extract")
         extract_btn.clicked.connect(self.extract_data)
+
         self.ai_btn = QPushButton("Generate AI Insight")
         self.ai_btn.clicked.connect(self.generate_ai_insight)
         self.ai_btn.setEnabled(False)
+
+        self.export_ai_btn = QPushButton("Export Insight")
+        self.export_ai_btn.clicked.connect(self.export_ai_insight)
+        self.export_ai_btn.setEnabled(False)
+
         btn_row.addWidget(extract_btn)
         btn_row.addWidget(self.ai_btn)
+        btn_row.addWidget(self.export_ai_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
+
 
         # Extraction output
         self.result_area = QTextEdit()
@@ -279,6 +287,8 @@ class ExtractPanel(QWidget):
         self._stop_spinner()
         self.ai_output.setPlainText(out or "(No AI output)")
         self.ai_btn.setEnabled(True)
+        self.export_ai_btn.setEnabled(True)
+
 
     def _ai_error(self, msg: str):
         self._stop_spinner()
@@ -347,3 +357,25 @@ class ExtractPanel(QWidget):
         for k in list(grouped.keys()):
             grouped[k] = sorted(set(grouped[k]))
         return grouped
+    
+    def export_ai_insight(self):
+        text = self.ai_output.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, "No Data", "No AI insight available to export.")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Insight Output",
+            "insight.txt",
+            "Text (*.txt);;Markdown (*.md);;All Files (*.*)"
+        )
+        if not path:
+            return
+
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+            QMessageBox.information(self, "Saved", f"Insight exported to:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+

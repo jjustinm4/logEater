@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-01-22T11:14:09Z",
+  "session_id": "XYZ777",
+  "level": "WARN",
+  "message": "No documents found",
+  "pipeline": {
+    "retriever": {
+      "documents_found": 0,
+      "top_document": null
+    }
+  },
+  "final_payload": {
+    "status": "fail",
+    "latency_ms": 301,
+    "response_text": "Sorry, I couldn't find information on that."
+  }
+}
