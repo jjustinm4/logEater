@@ -9,6 +9,8 @@ import json
 import re
 
 from core.llm.schema_extractor import SchemaExtractor
+import textwrap
+
 
 
 # ----------------------------
@@ -233,24 +235,26 @@ class ClassRegistrationDialog(QDialog):
             return out_path
 
         print(f"[INFO] Writing new parser file to: {out_path}")
-        content = f'''# Auto-generated parser for schema: {class_name}
-        from __future__ import annotations
-        from typing import Dict, Any
-        from .base_parser import BaseParser
-        from core.utils.dot_walker import get_dot_value
+        content = textwrap.dedent(f'''\
+# Auto-generated parser for schema: {class_name}
+from __future__ import annotations
+from typing import Dict, Any
+from .base_parser import BaseParser
+from core.utils.dot_walker import get_dot_value
 
 
-        class {class_title}(BaseParser):
-            """
-            Auto-generated parser. Override extract_field() for custom logic.
-            """
+class {class_title}(BaseParser):
+    """
+    Auto-generated parser. Override extract_field() for custom logic.
+    """
 
-            def extract_field(self, data: Dict[str, Any], field: str):
-                return None
+    def extract_field(self, data: Dict[str, Any], field: str):
+        return None
 
-            def _fallback_get(self, data: Dict[str, Any], field: str):
-                return get_dot_value(data, field)
-    '''
+    def _fallback_get(self, data: Dict[str, Any], field: str):
+        return get_dot_value(data, field)
+''')
+
         out_path.write_text(content, encoding="utf-8")
         print(f"[SUCCESS] Parser file written: {out_path}")
         return out_path
