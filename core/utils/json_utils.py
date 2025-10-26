@@ -41,29 +41,26 @@ _INDEX_SUFFIX = re.compile(r"""
 def normalize_key(key: str) -> str:
     k = (key or "").strip()
 
-    # 1) strip at first explicit delimiter style ( -- , — , " - " , ":" )
-    #    but keep the base portion
-    k_delim = _DELIM_PATTERN.sub("", k)
-    if k_delim and k_delim != k:
-        return k_delim.strip()
+    # 1) cut at first delimiter tail: --, —, " - ", ":", "-", ": "
+    #    everything after the delimiter is considered descriptive noise
+    k = re.split(r"\s*(?:--|—|-\s|:)\s*", k, maxsplit=1)[0]
 
-    # 2) strip index-like suffixes: _of_# / _# / -# / " #"
-    m = _INDEX_SUFFIX.match(k)
-    if m:
-        return m.group(1).strip()
+    # 2) strip trailing index-like suffixes (both underscore and plain forms)
+    #    e.g., "_of_12", " of 12", "_12", "-12", " 12" at the end
+    k = re.sub(r"(?:_of_\d+|(?:\s|_)of\s+\d+|_[0-9]+|-[0-9]+|\s+[0-9]+)$", "", k, flags=re.IGNORECASE)
 
-    # 3) if underscores present and the tail looks noisy (digits/extra words),
-    #    keep the first token only (subquery_3_details -> subquery)
-    if "_" in k:
-        head, *rest = k.split("_")
-        if rest:
-            # If the rest contains digits or long tail, prefer the head.
-            if any(ch.isdigit() for chunk in rest for ch in chunk):
-                return head.strip()
-            if len("_".join(rest)) > 10:  # heuristic for long noisy tail
-                return head.strip()
+    # 3) strip any remaining trailing " of <anything>" clause
+    #    e.g., "fetched document sections of 3 docs" -> "fetched document sections"
+    k = re.sub(r"\s+of\b.*$", "", k, flags=re.IGNORECASE)
 
-    return k  # unchanged
+    # 4) collapse whitespace to single spaces
+    k = re.sub(r"\s+", " ", k).strip()
+
+    # 5) lower-case for consistent merging (keeps the words, only case-folds)
+    k = k.lower()
+
+    return k
+
 
 
 # ----------------------------

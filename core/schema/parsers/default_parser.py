@@ -1,97 +1,87 @@
 # core/schema/parsers/default_parser.py
 from __future__ import annotations
 from typing import Dict, Any, List, Optional
-
 from .base_parser import BaseParser
-from core.utils.dot_walker import get_dot_value
+import re
+
 
 class DefaultParser(BaseParser):
     """
-    Generic, schema-aware parser:
-      - Uses dot-walker to fetch values.
-      - If a field is missing, returns a default INFERRED FROM THE SCHEMA SKELETON:
-          * dict  -> {}
-          * list  -> []
-          * other -> ""   (strings, numbers, booleans, null)
+    Robust Matching-Based Parser (tailored)
+      - Case-insensitive
+      - Underscore == space
+      - Strips delimiter tails for matching only: "--", "—", "-", ":"
+      - Strips trailing " of <digits>" for matching only
+      - ExtractionMatch = FIRST
     """
 
-    def __init__(self) -> None:
-        self._schema_skeleton: Optional[Dict[str, Any]] = None
-
-    # Called by ExtractService before extraction (see updated service below)
-    def set_schema(self, schema_skeleton: Dict[str, Any]) -> None:
-        self._schema_skeleton = schema_skeleton
-
     def extract(self, data: Dict[str, Any], fields: List[str]) -> Dict[str, Any]:
-        result: Dict[str, Any] = {}
-        for f in fields:
-            # Allow overrides hook
-            overridden = self.extract_field(data, f)
-            if overridden is not None:
-                result[f] = overridden
-                continue
+        results: Dict[str, Any] = {}
+        for field in fields:
+            val = self._resolve_field(data, field)
+            results[field] = val
+        return results
 
-            val = get_dot_value(data, f)
+    # ---------------- core resolution ----------------
+    def _resolve_field(self, data: Any, field: str) -> Any:
+        if not isinstance(data, dict):
+            return ""
 
-            if val is None:
-                # Missing in this log → return default based on schema node
-                expected = self._schema_node_for_path(f)
-                result[f] = self._default_for_schema_node(expected)
-            else:
-                result[f] = val
-        return result
+        # 1) direct match at this level
+        raw_key = self._find_match_key(data, field)
+        if raw_key:
+            return data[raw_key]
 
-    def extract_field(self, data: Dict[str, Any], field: str):
-        # No special overrides by default; subclasses can customize
-        return None
+        # 2) one-level wrapper (e.g., {"log": {...}})
+        for k, v in data.items():
+            if isinstance(v, dict):
+                raw_key = self._find_match_key(v, field)
+                if raw_key:
+                    return v[raw_key]
 
-    # -------- schema helpers --------
+        # 3) deep search anywhere
+        found = self._deep_find_match(data, field)
+        if found is not None:
+            return found
 
-    def _schema_node_for_path(self, dot_path: str) -> Any:
-        """
-        Traverse schema skeleton using the dot path.
-        When encountering a list, descend into its first element if it's a dict; otherwise treat as list node.
-        """
-        if not self._schema_skeleton:
-            return None
-
-        node: Any = self._schema_skeleton
-        parts = dot_path.split(".")
-
-        for key in parts:
-            if isinstance(node, dict):
-                if key in node:
-                    node = node[key]
-                else:
-                    # Key missing in skeleton → unknown type, fallback to ""
-                    return None
-            elif isinstance(node, list):
-                # For lists, we expect a single representative element
-                if node and isinstance(node[0], dict):
-                    # continue traversal in the representative object
-                    node = node[0]
-                    # retry same key on this dict level
-                    if key in node:
-                        node = node[key]
-                    else:
-                        return None
-                else:
-                    # primitive arrays or empty arrays
-                    return node
-            else:
-                # primitive reached before path ends → unknown
-                return None
-
-        return node
-
-    @staticmethod
-    def _default_for_schema_node(node: Any) -> Any:
-        if isinstance(node, dict):
-            return {}
-        if isinstance(node, list):
-            return []
-        # for primitives & unknowns, we use "" (consistent with skeleton rules)
+        # 4) not found
         return ""
 
-    def _fallback_get(self, data: Dict[str, Any], field: str):
-        return get_dot_value(data, field)
+    # ---------------- matching logic -----------------
+    _delim_split = re.compile(r"\s*(?:--|—|-\s|:)\s*")
+    _of_suffix = re.compile(r"\s+of\s+\d+\s*$", re.IGNORECASE)
+
+    def _normalize_for_match(self, s: str) -> str:
+        # lower, underscores->spaces
+        x = s.lower().replace("_", " ")
+        # cut at first delimiter tail
+        x = self._delim_split.split(x, maxsplit=1)[0]
+        # strip trailing " of <digits>"
+        x = self._of_suffix.sub("", x)
+        # collapse spaces
+        x = re.sub(r"\s+", " ", x).strip()
+        return x
+
+    def _find_match_key(self, obj: Dict[str, Any], schema_key: str) -> Optional[str]:
+        sk = self._normalize_for_match(schema_key)
+        for raw_key in obj.keys():
+            rk = self._normalize_for_match(raw_key)
+            if rk.startswith(sk):
+                return raw_key  # return the real key so we don't alter data
+        return None
+
+    def _deep_find_match(self, node: Any, schema_key: str) -> Optional[Any]:
+        if isinstance(node, dict):
+            mk = self._find_match_key(node, schema_key)
+            if mk:
+                return node[mk]
+            for v in node.values():
+                res = self._deep_find_match(v, schema_key)
+                if res is not None:
+                    return res
+        elif isinstance(node, list):
+            for item in node:
+                res = self._deep_find_match(item, schema_key)
+                if res is not None:
+                    return res
+        return None
