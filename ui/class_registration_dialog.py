@@ -213,36 +213,48 @@ class ClassRegistrationDialog(QDialog):
         return core + "Parser" if not core.endswith("Parser") else core
 
     def _write_parser_file(self, class_name: str, project_root: Path) -> Path:
+        print(f"[INFO] Starting _write_parser_file for class: {class_name}, project_root: {project_root}")
+
         parsers_dir = project_root / "core" / "schema" / "parsers"
+        print(f"[DEBUG] Ensuring directory exists: {parsers_dir}")
         parsers_dir.mkdir(parents=True, exist_ok=True)
 
         module_stem = self._safe_module_name(class_name)
+        print(f"[DEBUG] Generated module_stem: {module_stem}")
+
         class_title = self._class_name_from_schema(class_name)
+        print(f"[DEBUG] Generated class_title: {class_title}")
+
         out_path = parsers_dir / f"{module_stem}.py"
+        print(f"[DEBUG] Output path resolved to: {out_path}")
 
         if out_path.exists():  # PROTECT_MANUAL_EDITS
+            print(f"[INFO] File already exists, skipping generation: {out_path}")
             return out_path
 
+        print(f"[INFO] Writing new parser file to: {out_path}")
         content = f'''# Auto-generated parser for schema: {class_name}
-from __future__ import annotations
-from typing import Dict, Any
-from .base_parser import BaseParser
-from core.utils.dot_walker import get_dot_value
+        from __future__ import annotations
+        from typing import Dict, Any
+        from .base_parser import BaseParser
+        from core.utils.dot_walker import get_dot_value
 
 
-class {class_title}(BaseParser):
-    """
-    Auto-generated parser. Override extract_field() for custom logic.
-    """
+        class {class_title}(BaseParser):
+            """
+            Auto-generated parser. Override extract_field() for custom logic.
+            """
 
-    def extract_field(self, data: Dict[str, Any], field: str):
-        return None
+            def extract_field(self, data: Dict[str, Any], field: str):
+                return None
 
-    def _fallback_get(self, data: Dict[str, Any], field: str):
-        return get_dot_value(data, field)
-'''
+            def _fallback_get(self, data: Dict[str, Any], field: str):
+                return get_dot_value(data, field)
+    '''
         out_path.write_text(content, encoding="utf-8")
+        print(f"[SUCCESS] Parser file written: {out_path}")
         return out_path
+
 
 
     # ---------------- Save Schema ----------------
@@ -268,7 +280,7 @@ class {class_title}(BaseParser):
             QMessageBox.critical(self, "Save Error", f"Failed to save schema:\n{e}")
             return
 
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[1]
         parser_path = self._write_parser_file(class_name, project_root)
 
         QMessageBox.information(
