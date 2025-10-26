@@ -18,10 +18,6 @@ class ExtractionSummary:
         self.written_path = written_path
 
 class ExtractService:
-    """
-    Schema-based extractor: routes to schema-specific parser via Factory.
-    """
-
     def __init__(self, include_exts: List[str] | None = None):
         self.include_exts = set(include_exts or list(INCLUDE_EXTS))
 
@@ -36,14 +32,11 @@ class ExtractService:
         lines: List[str] = []
         for rec in records:
             lines.append("-" * 30)
-            lines.append(f"File: {rec.get('__file__','')}")
+            lines.append(f"File: {rec.get('__file__', '')}")
             for f in selected_fields:
                 val = rec.get(f, None)
                 if isinstance(val, (dict, list)):
-                    try:
-                        val_str = json.dumps(val, ensure_ascii=False)
-                    except Exception:
-                        val_str = str(val)
+                    val_str = json.dumps(val, ensure_ascii=False)
                 elif val is None:
                     val_str = ""
                 else:
@@ -59,6 +52,19 @@ class ExtractService:
     def _collect_records(self, folder: str, schema_name: str, selected_fields: List[str]) -> Tuple[List[Dict[str, Any]], int, int, int]:
         files = discover_files(folder, include_exts=self.include_exts)
         parser = ParserFactory.get(schema_name)
+
+        # Load the schema skeleton (superset) and pass to parser (subset-safe defaults)
+        schema_path = Path(__file__).resolve().parents[2] / "registry" / "schemas" / f"{schema_name}.json"
+        schema_skeleton: Dict[str, Any] = {}
+        if schema_path.exists():
+            try:
+                schema_skeleton = json.loads(schema_path.read_text(encoding="utf-8"))
+            except Exception:
+                schema_skeleton = {}
+        # not all parsers must implement set_schema; DefaultParser does.
+        if hasattr(parser, "set_schema"):
+            parser.set_schema(schema_skeleton)
+
         records: List[Dict[str, Any]] = []
         scanned = 0
         ok = 0
